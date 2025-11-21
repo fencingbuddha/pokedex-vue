@@ -8,17 +8,25 @@ const query = ref('pikachu')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-type Pokemon = {
+type PokemonSummary = {
   name: string
   id: number
   sprite: string
 }
 
-//current Pokemon result
-const pokemon = ref<Pokemon | null>(null)
+type PokemonDetail = {
+  name: string
+  id: number
+  sprite: string
+  stats: { name: string; baseStat: number }[]
+  abilities: string[]
+}
 
-//grid state
-const pokemonList = ref<Pokemon[]>([])
+//current Pokemon result (detail card)
+const pokemon = ref<PokemonDetail | null>(null)
+
+//grid state (summaries only)
+const pokemonList = ref<PokemonSummary[]>([])
 const listLoading = ref(false)
 const listError = ref<string | null>(null)
 const pageSize = 24
@@ -43,12 +51,26 @@ async function searchPokemon() {
       throw new Error('Pokemon not found')
     }
 
-    const data = await response.json()
+    type ApiStat = { base_stat: number; stat: { name: string } }
+    type ApiAbility = { ability: { name: string } }
+
+    const data = (await response.json()) as {
+      name: string
+      id: number
+      sprites: { front_default: string }
+      stats: ApiStat[]
+      abilities: ApiAbility[]
+    }
 
     pokemon.value = {
       name: data.name,
       id: data.id,
       sprite: data.sprites.front_default,
+      stats: data.stats.map((s) => ({
+        name: s.stat.name,
+        baseStat: s.base_stat,
+      })),
+      abilities: data.abilities.map((a) => a.ability.name),
     }
   } catch (err) {
     if (err instanceof Error) {
@@ -76,7 +98,7 @@ async function loadPokemonPage() {
 
     const data = (await response.json()) as { results: { name: string; url: string }[] }
 
-    const newPokemons: Pokemon[] = data.results.map((item) => {
+    const newPokemons: PokemonSummary[] = data.results.map((item) => {
       const match = item.url.match(/\/pokemon\/(\d+)\//)
       const id = match ? Number(match[1]) : NaN
 
@@ -104,7 +126,7 @@ async function loadPokemonPage() {
   }
 }
 
-function selectFromGrid(p: Pokemon) {
+function selectFromGrid(p: PokemonSummary) {
   query.value = p.name
   void searchPokemon()
 }
@@ -139,7 +161,26 @@ onMounted(() => {
     <section v-if="pokemon && !loading" class="card">
       <p class="id">#{{ pokemon.id }}</p>
       <img v-if="pokemon.sprite" :src="pokemon.sprite" :alt="pokemon.name" />
-      <h2>{{ pokemon.name }}</h2>
+      <h2 class="name">{{ pokemon.name }}</h2>
+
+      <div v-if="pokemon.stats.length" class="stats">
+        <h3>Stats</h3>
+        <ul>
+          <li v-for="stat in pokemon.stats" :key="stat.name">
+            <span class="stat-name">{{ stat.name }}</span>
+            <span class="stat-value">{{ stat.baseStat }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="pokemon.abilities.length" class="abilities">
+        <h3>Abilities</h3>
+        <ul>
+          <li v-for="ability in pokemon.abilities" :key="ability">
+            {{ ability }}
+          </li>
+        </ul>
+      </div>
     </section>
 
     <section class="grid-section">
@@ -195,6 +236,7 @@ onMounted(() => {
     'Open Sans',
     'Helvetica Neue',
     sans-serif;
+  color: #222;
 }
 
 h1 {
@@ -256,13 +298,51 @@ button:hover {
 
 .card .id {
   font-size: 0.85rem;
-  color: #888;
+  color: #555;
 }
 
 .card img {
   width: 120px;
   height: 120px;
   image-rendering: pixelated;
+}
+
+.stats {
+  margin-top: 1rem;
+  text-align: left;
+}
+
+.stats h3,
+.abilities h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.stats ul,
+.abilities ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.stats li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.stat-name {
+  text-transform: capitalize;
+}
+
+.abilities {
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.abilities li {
+  font-size: 0.9rem;
+  text-transform: capitalize;
 }
 
 .grid-section {
@@ -278,7 +358,7 @@ button:hover {
 
 .grid-meta {
   font-size: 0.9rem;
-  color: #666;
+  color: #444;
 }
 
 .grid-loading {
