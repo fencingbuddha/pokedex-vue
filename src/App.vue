@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 //search input state
 const query = ref('pikachu')
@@ -8,22 +8,36 @@ const query = ref('pikachu')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-//current Pokemon result
-const pokemon = ref<null | {
+type Pokemon = {
   name: string
   id: number
   sprite: string
-}>(null)
+}
+
+//current Pokemon result
+const pokemon = ref<Pokemon | null>(null)
+
+//grid state
+const pokemonList = ref<Pokemon[]>([])
+const listLoading = ref(false)
+const listError = ref<string | null>(null)
+const pageSize = 24
+const nextOffset = ref(0)
+
+function normalizeQuery(value: string): string {
+  return value.trim().toLowerCase().replace(/^#/, '')
+}
 
 async function searchPokemon() {
-  if (!query.value.trim()) return
+  const normalizedQuery = normalizeQuery(query.value)
+  if (!normalizedQuery) return
 
   loading.value = true
   error.value = null
   pokemon.value = null
 
   try {
-    const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${query.value.toLowerCase()}`)
+    const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${normalizedQuery}`)
 
     if (!response.ok) {
       throw new Error('Pokemon not found')
@@ -47,8 +61,59 @@ async function searchPokemon() {
   }
 }
 
-// show something on first load
-searchPokemon()
+async function loadPokemonPage() {
+  listLoading.value = true
+  listError.value = null
+
+  try {
+    const response = await fetch(
+      `https://pokeapi.co/api/v2/pokemon?limit=${pageSize}&offset=${nextOffset.value}`,
+    )
+
+    if (!response.ok) {
+      throw new Error('Failed to load Pokemon list')
+    }
+
+    const data = (await response.json()) as { results: { name: string; url: string }[] }
+
+    const newPokemons: Pokemon[] = data.results.map((item) => {
+      const match = item.url.match(/\/pokemon\/(\d+)\//)
+      const id = match ? Number(match[1]) : NaN
+
+      const sprite = Number.isFinite(id)
+        ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`
+        : ''
+
+      return {
+        name: item.name,
+        id,
+        sprite,
+      }
+    })
+
+    pokemonList.value = [...pokemonList.value, ...newPokemons]
+    nextOffset.value += pageSize
+  } catch (err) {
+    if (err instanceof Error) {
+      listError.value = err.message
+    } else {
+      listError.value = 'Something went wrong loading the list'
+    }
+  } finally {
+    listLoading.value = false
+  }
+}
+
+function selectFromGrid(p: Pokemon) {
+  query.value = p.name
+  void searchPokemon()
+}
+
+onMounted(() => {
+  // show something on first load
+  searchPokemon()
+  loadPokemonPage()
+})
 </script>
 
 <template>
@@ -72,9 +137,43 @@ searchPokemon()
     </section>
 
     <section v-if="pokemon && !loading" class="card">
-      <p class="id">#{{ pokemon.id }}></p>
+      <p class="id">#{{ pokemon.id }}</p>
       <img v-if="pokemon.sprite" :src="pokemon.sprite" :alt="pokemon.name" />
       <h2>{{ pokemon.name }}</h2>
+    </section>
+
+    <section class="grid-section">
+      <div class="grid-header">
+        <h2>Pokemon Grid</h2>
+        <p class="grid-meta">Showing {{ pokemonList.length }} Pokemon</p>
+      </div>
+
+      <p v-if="listError" class="error">
+        {{ listError }}
+      </p>
+
+      <div v-if="listLoading && pokemonList.length === 0" class="grid-loading">
+        Loading Pokemon...
+      </div>
+
+      <div v-if="pokemonList.length" class="grid">
+        <article
+          v-for="p in pokemonList"
+          :key="p.id"
+          class="card card--grid"
+          @click="selectFromGrid(p)"
+        >
+          <p class="id">#{{ p.id }}</p>
+          <img v-if="p.sprite" :src="p.sprite" :alt="p.name" />
+          <h3 class="name">{{ p.name }}</h3>
+        </article>
+      </div>
+
+      <div class="grid-actions">
+        <button type="button" class="load-more" :disabled="listLoading" @click="loadPokemonPage">
+          {{ listLoading ? 'Loading…' : 'Load more' }}
+        </button>
+      </div>
     </section>
   </main>
 </template>
@@ -132,7 +231,7 @@ button {
   font-weight: 600;
 }
 
-button.hover {
+button:hover {
   opacity: 0.9;
 }
 
@@ -164,5 +263,62 @@ button.hover {
   width: 120px;
   height: 120px;
   image-rendering: pixelated;
+}
+
+.grid-section {
+  margin-top: 3rem;
+}
+
+.grid-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1rem;
+}
+
+.grid-meta {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.grid-loading {
+  margin-top: 1rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.card--grid {
+  cursor: pointer;
+  max-width: none;
+}
+
+.card--grid .name {
+  text-transform: capitalize;
+}
+
+.grid-actions {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.load-more {
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background-color: #2b7cff;
+  color: #fff;
+  font-weight: 600;
+}
+
+.load-more:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 </style>
